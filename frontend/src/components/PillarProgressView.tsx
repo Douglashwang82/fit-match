@@ -20,7 +20,7 @@ export default function PillarProgressView({
   return (
     <div className="pillar-progress-view">
       <div className="pillar-header">
-        <h3>訓練支柱</h3>
+        <h3>訓練專項</h3>
         <button className="btn-customize" onClick={onCustomize}>
           自訂
         </button>

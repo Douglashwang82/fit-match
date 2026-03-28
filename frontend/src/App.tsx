@@ -1,10 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, Component, type ReactNode } from "react";
 import type {
   AppView,
   UserProfile,
-  TrainingPlan,
-  WorkoutHistory,
-  DailyWorkout,
   DailyEnergyLevel,
   Gender,
   FitnessLevel,
@@ -17,8 +14,6 @@ import type {
   PillarDailyWorkout,
 } from "./types";
 import {
-  generateTrainingPlan,
-  generateDailyWorkout,
   sendChatMessage,
   generatePillarPlan,
   generateAdaptiveWorkout,
@@ -27,11 +22,6 @@ import {
 import {
   getProfile,
   saveProfile,
-  getPlan,
-  savePlan,
-  confirmPlan,
-  getHistory,
-  recordWorkoutCompletion,
   clearAll,
   getPillarPlan,
   savePillarPlan,
@@ -39,7 +29,6 @@ import {
   getPillarHistory,
   recordPillarWorkoutCompletion,
   calculatePillarProgress,
-  migrateToV2Plan,
 } from "./storage";
 import { BodyInfoStep, HabitsStep, GoalStep } from "./components/ProfileSetup";
 import PlanReview from "./components/PlanReview";
@@ -79,18 +68,89 @@ function getInitialTheme(): Theme {
   return "dark";
 }
 
+const LOADING_MESSAGES = [
+  "分析你的健身目標與體能狀況...",
+  "根據你的習慣設計訓練架構...",
+  "規劃專屬的訓練柱組合...",
+  "調整強度與每週訓練頻率...",
+  "整合睡眠、飲食與工作習慣...",
+  "為你準備個人化訓練計畫...",
+];
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMsg: error.message };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("ErrorBoundary:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary-page">
+          <div className="error-boundary-content">
+            <div className="error-boundary-icon">🛠️</div>
+            <h1>哎呀，出了點問題</h1>
+            <p className="error-boundary-msg">應用程式發生錯誤，請重新整理頁面。</p>
+            <p className="error-boundary-detail">{this.state.errorMsg}</p>
+            <button className="btn-primary" style={{ marginTop: 8 }} onClick={() => window.location.reload()}>
+              重新整理頁面
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+export { ErrorBoundary };
+
+function PlanLoadingScreen() {
+  const [msgIdx, setMsgIdx] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const progressRef = useRef(0);
+
+  useEffect(() => {
+    const msgTimer = setInterval(() => {
+      setMsgIdx(i => (i + 1) % LOADING_MESSAGES.length);
+    }, 2400);
+    return () => clearInterval(msgTimer);
+  }, []);
+
+  useEffect(() => {
+    const progTimer = setInterval(() => {
+      if (progressRef.current < 88) {
+        // Accelerate early, slow down near the end
+        const step = progressRef.current < 40 ? 2 : 0.8;
+        progressRef.current = Math.min(progressRef.current + step, 88);
+        setProgress(progressRef.current);
+      }
+    }, 180);
+    return () => clearInterval(progTimer);
+  }, []);
+
+  return (
+    <div className="plan-loading-screen">
+      <div className="plan-loading-icon">🏋️</div>
+      <h2 className="plan-loading-title">正在建立你的訓練計畫</h2>
+      <p key={msgIdx} className="plan-loading-msg">{LOADING_MESSAGES[msgIdx]}</p>
+      <div className="plan-loading-bar">
+        <div className="plan-loading-fill" style={{ width: `${progress}%` }} />
+      </div>
+      <p className="plan-loading-hint">這需要約 10–20 秒，請稍候</p>
+    </div>
+  );
+}
+
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [view, setView] = useState<AppView>("profile-setup");
   const [profileStep, setProfileStep] = useState<ProfileStep>("body");
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [plan, setPlan] = useState<TrainingPlan | null>(null);
-  const [planResponse, setPlanResponse] = useState<{
-    week_overview: TrainingPlan["weekOverview"];
-    plan_summary: string;
-    weekly_goal: string;
-  } | null>(null);
-  const [history, setHistory] = useState<WorkoutHistory>(getHistory());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,9 +161,6 @@ export default function App() {
   // Pillar-based system state
   const [pillarPlan, setPillarPlan] = useState<PillarBasedPlan | null>(null);
   const [pillarHistory, setPillarHistory] = useState<PillarWorkoutHistory>(getPillarHistory());
-
-  // Use pillar system by default for new plans
-  const usePillarSystem = true;
 
   // Calculate pillar progress
   const pillarProgress = useMemo(() => {
@@ -126,31 +183,15 @@ export default function App() {
   // Initialize from localStorage
   useEffect(() => {
     const savedProfile = getProfile();
-    const savedPlan = getPlan();
     const savedPillarPlan = getPillarPlan();
-    const savedHistory = getHistory();
     const savedPillarHistory = getPillarHistory();
-
-    // Try to migrate legacy data to pillar system
-    migrateToV2Plan();
 
     if (savedProfile) {
       setProfile(savedProfile);
-      setHistory(savedHistory);
       setPillarHistory(savedPillarHistory);
 
-      // Check for pillar plan first (new system)
       if (savedPillarPlan && savedPillarPlan.confirmed) {
         setPillarPlan(savedPillarPlan);
-        setView("dashboard");
-      } else if (savedPlan && savedPlan.confirmed) {
-        // Fall back to legacy plan
-        setPlan(savedPlan);
-        setPlanResponse({
-          week_overview: savedPlan.weekOverview,
-          plan_summary: "",
-          weekly_goal: "",
-        });
         setView("dashboard");
       }
     }
@@ -182,16 +223,9 @@ export default function App() {
     setError(null);
 
     try {
-      if (usePillarSystem) {
-        // Generate pillar-based plan
-        const response = await generatePillarPlan(fullProfile);
-        setPillarPlan(response);
-        savePillarPlan(response);
-      } else {
-        // Legacy 7-day plan
-        const response = await generateTrainingPlan(fullProfile);
-        setPlanResponse(response);
-      }
+      const response = await generatePillarPlan(fullProfile);
+      setPillarPlan(response);
+      savePillarPlan(response);
       setView("plan-review");
     } catch (e) {
       setError(e instanceof Error ? e.message : "產生計畫時發生錯誤");
@@ -207,14 +241,9 @@ export default function App() {
     setError(null);
 
     try {
-      if (usePillarSystem) {
-        const response = await generatePillarPlan(profile);
-        setPillarPlan(response);
-        savePillarPlan(response);
-      } else {
-        const response = await generateTrainingPlan(profile);
-        setPlanResponse(response);
-      }
+      const response = await generatePillarPlan(profile);
+      setPillarPlan(response);
+      savePillarPlan(response);
     } catch (e) {
       setError(e instanceof Error ? e.message : "產生計畫時發生錯誤");
     } finally {
@@ -223,38 +252,19 @@ export default function App() {
   };
 
   const handleConfirmPlan = () => {
-    if (usePillarSystem && pillarPlan) {
-      confirmPillarPlan();
-      setPillarPlan({ ...pillarPlan, confirmed: true });
-      setView("dashboard");
-      return;
-    }
-
-    if (!planResponse) return;
-
-    const newPlan: TrainingPlan = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      weekOverview: planResponse.week_overview,
-      confirmed: true,
-    };
-
-    setPlan(newPlan);
-    savePlan(newPlan);
-    confirmPlan();
+    if (!pillarPlan) return;
+    confirmPillarPlan();
+    setPillarPlan({ ...pillarPlan, confirmed: true });
     setView("dashboard");
   };
 
   const handleResetProfile = () => {
     clearAll();
     setProfile(null);
-    setPlan(null);
-    setPlanResponse(null);
     setPillarPlan(null);
     setPillarHistory(getPillarHistory());
     setBodyInfo(null);
     setHabitsData(null);
-    setHistory(getHistory());
     setProfileStep("body");
     setView("profile-setup");
   };
@@ -262,21 +272,15 @@ export default function App() {
   // Chat handler
   const handleChatMessage = async (messages: { role: "user" | "assistant"; content: string }[]) => {
     if (!profile) throw new Error("No profile");
-    return sendChatMessage(profile, history, messages);
-  };
-
-  // Generate workout handler for ChatDashboard
-  const handleGenerateWorkout = async (energy: DailyEnergyLevel): Promise<DailyWorkout> => {
-    if (!profile || !planResponse) throw new Error("No profile or plan");
-
-    const dayOfWeek = new Date().getDay() || 7;
-    return generateDailyWorkout(profile, planResponse, history, energy, dayOfWeek);
-  };
-
-  // Workout complete handler for ChatDashboard
-  const handleWorkoutComplete = (difficulty: WorkoutDifficulty, notes?: string) => {
-    recordWorkoutCompletion(true, "medium", difficulty, notes);
-    setHistory(getHistory());
+    const history = getPillarHistory();
+    // Build a minimal WorkoutHistory from pillar history for the chat API
+    return sendChatMessage(profile, {
+      daysCompleted: [],
+      currentStreak: history.currentStreak,
+      totalWorkouts: history.totalWorkouts,
+      lastWorkoutDate: history.lastWorkoutDate,
+      feedback: [],
+    }, messages);
   };
 
   // Pillar workout handlers
@@ -325,6 +329,10 @@ export default function App() {
 
   // Render
   const renderContent = () => {
+    if (isLoading) {
+      return <PlanLoadingScreen />;
+    }
+
     if (view === "profile-setup") {
       if (profileStep === "body") {
         return <BodyInfoStep onNext={handleBodyInfoNext} initialData={bodyInfo || undefined} />;
@@ -348,56 +356,30 @@ export default function App() {
       }
     }
 
-    if (view === "plan-review") {
-      if (usePillarSystem && pillarPlan) {
-        return (
-          <PlanReview
-            pillarPlan={pillarPlan}
-            onConfirm={handleConfirmPlan}
-            onRegenerate={handleRegeneratePlan}
-            isLoading={isLoading}
-          />
-        );
-      }
-      if (planResponse) {
-        return (
-          <PlanReview
-            plan={planResponse}
-            onConfirm={handleConfirmPlan}
-            onRegenerate={handleRegeneratePlan}
-            isLoading={isLoading}
-          />
-        );
-      }
-    }
-
-    if (view === "dashboard" && profile && (plan || pillarPlan)) {
+    if (view === "plan-review" && pillarPlan) {
       return (
-        <ChatDashboard
-          profile={profile}
-          history={history}
-          plan={plan}
+        <PlanReview
           pillarPlan={pillarPlan}
-          pillarHistory={pillarHistory}
-          pillarProgress={pillarProgress}
-          onSendMessage={handleChatMessage}
-          onGenerateWorkout={handleGenerateWorkout}
-          onGeneratePillarWorkout={handleGeneratePillarWorkout}
-          onWorkoutComplete={handleWorkoutComplete}
-          onPillarWorkoutComplete={handlePillarWorkoutComplete}
-          onCustomizePillars={handleCustomizePillars}
-          onResetProfile={handleResetProfile}
+          onConfirm={handleConfirmPlan}
+          onRegenerate={handleRegeneratePlan}
+          isLoading={isLoading}
         />
       );
     }
 
-    // Loading state
-    if (isLoading) {
+    if (view === "dashboard" && profile && pillarPlan) {
       return (
-        <div className="step-container">
-          <div className="loading-spinner" />
-          <p className="loading-text">正在產生你的專屬計畫...</p>
-        </div>
+        <ChatDashboard
+          profile={profile}
+          pillarPlan={pillarPlan}
+          pillarHistory={pillarHistory}
+          pillarProgress={pillarProgress}
+          onSendMessage={handleChatMessage}
+          onGeneratePillarWorkout={handleGeneratePillarWorkout}
+          onPillarWorkoutComplete={handlePillarWorkoutComplete}
+          onCustomizePillars={handleCustomizePillars}
+          onResetProfile={handleResetProfile}
+        />
       );
     }
 
@@ -418,7 +400,7 @@ export default function App() {
   };
 
   // For dashboard view, render without the standard app-main wrapper
-  if (view === "dashboard" && profile && (plan || pillarPlan)) {
+  if (view === "dashboard" && profile && pillarPlan) {
     return (
       <div className="app app-dashboard">
         <header className="app-header">

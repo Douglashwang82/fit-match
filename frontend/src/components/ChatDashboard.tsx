@@ -1,9 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import type {
   UserProfile,
-  WorkoutHistory,
-  TrainingPlan,
-  DailyWorkout,
   DailyEnergyLevel,
   PillarBasedPlan,
   PillarWorkoutHistory,
@@ -11,11 +8,8 @@ import type {
   TrainingPillar,
   PillarDailyWorkout,
 } from "../types";
-import { getTodayWorkout, saveTodayWorkout, clearTodayWorkout, getCompletedPlanDays, togglePlanDayCompletion } from "../storage";
 import PillarProgressView from "./PillarProgressView";
 import PillarCustomizer from "./PillarCustomizer";
-
-type MobileView = "panel" | "chat";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -31,34 +25,31 @@ type PanelView = "stats" | "plan" | "workout";
 
 interface Props {
   profile: UserProfile;
-  history: WorkoutHistory;
-  plan: TrainingPlan | null;
   // Pillar-based system props
   pillarPlan: PillarBasedPlan | null;
   pillarHistory: PillarWorkoutHistory;
   pillarProgress: PillarProgress[];
   onSendMessage: (messages: ChatMessage[]) => Promise<{ message: string; action: UIAction }>;
-  onGenerateWorkout: (energy: DailyEnergyLevel) => Promise<DailyWorkout>;
   onGeneratePillarWorkout: (energy: DailyEnergyLevel, pillarId: string) => Promise<PillarDailyWorkout>;
-  onWorkoutComplete: (difficulty: "too_easy" | "just_right" | "too_hard", notes?: string) => void;
   onPillarWorkoutComplete: (pillarId: string, duration: number, difficulty: "too_easy" | "just_right" | "too_hard") => void;
   onCustomizePillars: (pillars: TrainingPillar[]) => void;
   onResetProfile: () => void;
 }
 
-const DAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+const QUICK_CHIPS = [
+  { label: "開始訓練 💪", message: "開始今天的訓練" },
+  { label: "查看計畫 📋", message: "看看我的訓練計畫" },
+  { label: "今日進度 📊", message: "今天的訓練進度" },
+  { label: "需要休息 😴", message: "我今天很累，有什麼建議？" },
+];
 
 export default function ChatDashboard({
   profile,
-  history,
-  plan,
   pillarPlan,
   pillarHistory,
   pillarProgress,
   onSendMessage,
-  onGenerateWorkout,
   onGeneratePillarWorkout,
-  onWorkoutComplete,
   onPillarWorkoutComplete,
   onCustomizePillars,
   onResetProfile,
@@ -72,62 +63,30 @@ export default function ChatDashboard({
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [panelView, setPanelView] = useState<PanelView>("stats");
-  const [currentWorkout, setCurrentWorkout] = useState<DailyWorkout | null>(null);
   const [currentPillarWorkout, setCurrentPillarWorkout] = useState<PillarDailyWorkout | null>(null);
   const [isGeneratingWorkout, setIsGeneratingWorkout] = useState(false);
-  const [completedDays, setCompletedDays] = useState<number[]>([]);
-  const [recentlyCompleted, setRecentlyCompleted] = useState<number | null>(null);
   const [completedExercises, setCompletedExercises] = useState<number[]>([]);
   const [recentlyCompletedExercise, setRecentlyCompletedExercise] = useState<number | null>(null);
-  const [mobileView, setMobileView] = useState<MobileView>("chat");
-  const [isMobile, setIsMobile] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCustomizingPillars, setIsCustomizingPillars] = useState(false);
   const [selectedPillarId, setSelectedPillarId] = useState<string | null>(null);
-
-  // Determine if using pillar-based system
-  const usePillarSystem = pillarPlan !== null && pillarPlan.confirmed;
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [celebrationStats, setCelebrationStats] = useState<{
+    duration: number;
+    exercisesTotal: number;
+    exercisesDone: number;
+    pillarName: string;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  // Detect mobile viewport
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  }, []);
-
-  const handleMobileNavClick = useCallback((view: MobileView) => {
-    setMobileView(view);
-  }, []);
-
-  // Load today's workout and completed days from storage on mount
-  useEffect(() => {
-    const savedWorkout = getTodayWorkout();
-    if (savedWorkout) {
-      setCurrentWorkout(savedWorkout);
-      setPanelView("workout");
-    }
-    const { completedDays: saved } = getCompletedPlanDays();
-    setCompletedDays(saved);
-  }, []);
+  const sheetMessagesRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef(0);
 
   // Reset completed exercises when workout changes
   useEffect(() => {
     setCompletedExercises([]);
-  }, [currentWorkout?.date, currentPillarWorkout?.date]);
-
-  const handleToggleDayComplete = (dayNumber: number) => {
-    const newState = togglePlanDayCompletion(dayNumber);
-    if (newState) {
-      setRecentlyCompleted(dayNumber);
-      setTimeout(() => setRecentlyCompleted(null), 600);
-    }
-    setCompletedDays(getCompletedPlanDays().completedDays);
-  };
+  }, [currentPillarWorkout?.date]);
 
   const handleToggleExercise = (index: number) => {
     const isCompleted = completedExercises.includes(index);
@@ -173,8 +132,33 @@ export default function ChatDashboard({
   };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (isChatOpen) {
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    }
+  }, [messages, isChatOpen]);
+
+  // Swipe down on messages to close the sheet
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const el = sheetMessagesRef.current;
+    if (!el) return;
+    const dy = e.touches[0].clientY - touchStartY.current;
+    if (el.scrollTop <= 0 && dy > 50) {
+      setIsChatOpen(false);
+    }
+  };
+
+  // Scroll up past the top to dismiss on desktop
+  const handleMessagesWheel = (e: React.WheelEvent) => {
+    const el = sheetMessagesRef.current;
+    if (!el) return;
+    if (el.scrollTop <= 0 && e.deltaY < 0) {
+      setIsChatOpen(false);
+    }
+  };
 
   const handleSend = async () => {
     const trimmed = input.trim();
@@ -211,18 +195,12 @@ export default function ChatDashboard({
         setIsGeneratingWorkout(true);
         try {
           const energy = action.energy_level || "medium";
-          if (usePillarSystem) {
-            // For pillar system, use highest priority pillar
-            const topPillar = pillarProgress[0]?.pillar;
-            if (topPillar) {
-              const workout = await onGeneratePillarWorkout(energy, topPillar.id);
-              setCurrentPillarWorkout(workout);
-              setSelectedPillarId(topPillar.id);
-            }
-          } else {
-            const workout = await onGenerateWorkout(energy);
-            setCurrentWorkout(workout);
-            saveTodayWorkout(workout);
+          // For pillar system, use highest priority pillar
+          const topPillar = pillarProgress[0]?.pillar;
+          if (topPillar) {
+            const workout = await onGeneratePillarWorkout(energy, topPillar.id);
+            setCurrentPillarWorkout(workout);
+            setSelectedPillarId(topPillar.id);
           }
         } catch (error) {
           setMessages((prev) => [
@@ -255,11 +233,6 @@ export default function ChatDashboard({
       onPillarWorkoutComplete(selectedPillarId, currentPillarWorkout.estimatedDuration, difficulty);
       setCurrentPillarWorkout(null);
       setSelectedPillarId(null);
-    } else {
-      // Legacy workout completion
-      onWorkoutComplete(difficulty);
-      setCurrentWorkout(null);
-      clearTodayWorkout();
     }
     setPanelView("stats");
     setMessages((prev) => [
@@ -268,8 +241,8 @@ export default function ChatDashboard({
     ]);
   };
 
-  const handleQuickAction = (action: string) => {
-    setInput(action);
+  const handleQuickAction = (message: string) => {
+    setInput(message);
     setTimeout(() => {
       handleSend();
     }, 100);
@@ -356,75 +329,15 @@ export default function ChatDashboard({
             <div className="workout-actions">
               <button
                 className="btn-workout-done"
-                onClick={() => handleWorkoutFinish("just_right")}
-              >
-                完成訓練 ✓
-              </button>
-            </div>
-          </div>
-        );
-      }
-
-      // Legacy workout view
-      if (currentWorkout) {
-        return (
-          <div className="workout-panel">
-            <div className="workout-panel-header">
-              <h3>今日訓練</h3>
-              <span className="workout-duration">{currentWorkout.estimatedDuration} 分鐘</span>
-            </div>
-
-            <div className="workout-motivation">{currentWorkout.motivationMessage}</div>
-
-            <div className="workout-section">
-              <h4>熱身</h4>
-              <p>{currentWorkout.warmup}</p>
-            </div>
-
-            <div className="workout-section">
-              <h4>主訓練 <span className="exercise-progress">({completedExercises.length}/{currentWorkout.exercises.length})</span></h4>
-              <div className="exercise-list-compact">
-                {currentWorkout.exercises.map((ex, idx) => {
-                  const isCompleted = completedExercises.includes(idx);
-                  const isJustCompleted = recentlyCompletedExercise === idx;
-                  return (
-                    <div
-                      key={idx}
-                      className={`exercise-item-compact ${isCompleted ? "completed" : ""} ${isJustCompleted ? "just-completed" : ""}`}
-                      onClick={() => handleToggleExercise(idx)}
-                    >
-                      <div className="exercise-checkbox">
-                        <div className={`checkbox ${isCompleted ? "checked" : ""}`}>
-                          {isCompleted && (
-                            <svg className="checkmark" viewBox="0 0 24 24">
-                              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                      <span className="exercise-num">{idx + 1}</span>
-                      <div className="exercise-info">
-                        <span className="exercise-name">{ex.name}</span>
-                        <span className="exercise-detail">
-                          {ex.sets != null && ex.reps && `${ex.sets}組 × ${ex.reps}`}
-                          {ex.duration_seconds != null && `${ex.duration_seconds}秒`}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="workout-section">
-              <h4>收操</h4>
-              <p>{currentWorkout.cooldown}</p>
-            </div>
-
-            <div className="workout-actions">
-              <button
-                className="btn-workout-done"
-                onClick={() => handleWorkoutFinish("just_right")}
+                onClick={() => {
+                  setCelebrationStats({
+                    duration: currentPillarWorkout!.estimatedDuration,
+                    exercisesTotal: currentPillarWorkout!.exercises.length,
+                    exercisesDone: completedExercises.length,
+                    pillarName: currentPillarWorkout!.pillarName,
+                  });
+                  setShowCelebration(true);
+                }}
               >
                 完成訓練 ✓
               </button>
@@ -435,64 +348,18 @@ export default function ChatDashboard({
     }
 
     if (panelView === "plan") {
-      // Pillar-based plan view
-      if (usePillarSystem) {
-        return (
-          <PillarProgressView
-            pillarProgress={pillarProgress}
-            onPillarClick={handlePillarClick}
-            onCustomize={handleCustomizePillars}
-          />
-        );
-      }
-
-      // Legacy 7-day plan view
-      if (plan) {
-        return (
-          <div className="plan-panel">
-            <h3>本週訓練計畫</h3>
-            <p className="plan-hint">點擊打勾完成項目</p>
-            <div className="plan-grid">
-              {plan.weekOverview.map((day) => {
-                const isCompleted = completedDays.includes(day.day);
-                const isJustCompleted = recentlyCompleted === day.day;
-                return (
-                  <div
-                    key={day.day}
-                    className={`plan-day ${getDayClass(day.intensity)} ${isCompleted ? "completed" : ""} ${isJustCompleted ? "just-completed" : ""}`}
-                    onClick={() => handleToggleDayComplete(day.day)}
-                  >
-                    <div className="plan-day-checkbox">
-                      <div className={`checkbox ${isCompleted ? "checked" : ""}`}>
-                        {isCompleted && (
-                          <svg className="checkmark" viewBox="0 0 24 24">
-                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                    <div className="plan-day-content">
-                      <div className="plan-day-header">
-                        <span className="plan-day-num">Day {day.day}</span>
-                        <span className="plan-day-label">週{DAY_LABELS[day.day % 7]}</span>
-                      </div>
-                      <div className="plan-day-focus">{day.focus}</div>
-                      <div className="plan-day-meta">
-                        {day.duration}分 · {getIntensityLabel(day.intensity)}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      }
+      return (
+        <PillarProgressView
+          pillarProgress={pillarProgress}
+          onPillarClick={handlePillarClick}
+          onCustomize={handleCustomizePillars}
+        />
+      );
     }
 
     // Stats view (default)
-    const currentStreak = usePillarSystem ? pillarHistory.currentStreak : history.currentStreak;
-    const totalWorkouts = usePillarSystem ? pillarHistory.totalWorkouts : history.totalWorkouts;
+    const currentStreak = pillarHistory.currentStreak;
+    const totalWorkouts = pillarHistory.totalWorkouts;
 
     return (
       <div className="stats-panel">
@@ -513,26 +380,15 @@ export default function ChatDashboard({
 
         <div className="today-preview">
           <h4>今日安排</h4>
-          {usePillarSystem ? (
-            pillarProgress.length > 0 ? (
-              <div className="today-info">
-                <span className="today-focus">建議: {pillarProgress[0].pillar.name}</span>
-                <span className="today-meta">
-                  {pillarProgress[0].pillar.defaultDuration}分鐘 · {getIntensityLabel(pillarProgress[0].recommendedIntensity)}
-                </span>
-              </div>
-            ) : (
-              <p className="rest-day">沒有訓練計畫 📋</p>
-            )
-          ) : getTodayPlan() ? (
+          {pillarProgress.length > 0 ? (
             <div className="today-info">
-              <span className="today-focus">{getTodayPlan()?.focus}</span>
+              <span className="today-focus">建議: {pillarProgress[0].pillar.name}</span>
               <span className="today-meta">
-                {getTodayPlan()?.duration}分鐘 · {getIntensityLabel(getTodayPlan()?.intensity || "medium")}
+                {pillarProgress[0].pillar.defaultDuration}分鐘 · {getIntensityLabel(pillarProgress[0].recommendedIntensity)}
               </span>
             </div>
           ) : (
-            <p className="rest-day">今天是休息日 🧘</p>
+            <p className="rest-day">沒有訓練計畫 📋</p>
           )}
         </div>
 
@@ -546,110 +402,138 @@ export default function ChatDashboard({
     );
   };
 
-  const getTodayPlan = () => {
-    if (!plan) return null;
-    const dayOfWeek = new Date().getDay() || 7;
-    return plan.weekOverview.find((d) => d.day === dayOfWeek);
-  };
-
   return (
     <div className="chat-dashboard">
-      {/* Side Panel */}
-      <div className={`dashboard-panel ${isMobile && mobileView === "panel" ? "mobile-visible" : ""}`}>
-        <div className="panel-tabs">
-          <button
-            className={panelView === "stats" ? "active" : ""}
-            onClick={() => setPanelView("stats")}
-          >
-            總覽
-          </button>
-          <button
-            className={panelView === "plan" ? "active" : ""}
-            onClick={() => setPanelView("plan")}
-          >
-            計畫
-          </button>
-          <button
-            className={panelView === "workout" ? "active" : ""}
-            onClick={() => setPanelView("workout")}
-            disabled={!currentWorkout && !currentPillarWorkout && !isGeneratingWorkout}
-          >
-            訓練
-          </button>
-        </div>
-
-        <div className="panel-content">{renderPanel()}</div>
-
-        <button className="btn-reset" onClick={onResetProfile}>
-          重新設定
-        </button>
-      </div>
-
-      {/* Chat Area */}
-      <div className={`chat-area ${isMobile && mobileView === "panel" ? "mobile-hidden" : ""}`}>
-        <div className="chat-messages-main">
-          {messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`chat-msg ${msg.role === "user" ? "user" : "assistant"}`}
-            >
-              {msg.role === "assistant" && <span className="msg-avatar">🏋️</span>}
-              <div className="msg-bubble">{msg.content}</div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="chat-msg assistant">
-              <span className="msg-avatar">🏋️</span>
-              <div className="msg-bubble typing">
-                <span className="dot"></span>
-                <span className="dot"></span>
-                <span className="dot"></span>
+      {showCelebration && celebrationStats && (
+        <div className="celebration-overlay">
+          <div className="celebration-content">
+            <div className="celebration-emoji">🎉</div>
+            <h2 className="celebration-title">訓練完成！</h2>
+            <p className="celebration-subtitle">{celebrationStats.pillarName}</p>
+            <div className="celebration-stats">
+              <div className="cel-stat">
+                <span className="cel-stat-num">{celebrationStats.duration}</span>
+                <span className="cel-stat-label">分鐘</span>
+              </div>
+              <div className="cel-stat">
+                <span className="cel-stat-num">{celebrationStats.exercisesDone}/{celebrationStats.exercisesTotal}</span>
+                <span className="cel-stat-label">動作完成</span>
               </div>
             </div>
-          )}
-          <div ref={messagesEndRef} />
+            <button
+              className="btn-primary celebration-close"
+              onClick={() => {
+                setShowCelebration(false);
+                setCelebrationStats(null);
+                handleWorkoutFinish("just_right");
+              }}
+            >
+              繼續 →
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="chat-inner">
+        {/* Scrollable panel content */}
+        <div className="dashboard-content-area">
+          <div className="dashboard-panel">
+            <div className="panel-tabs">
+              <button
+                className={panelView === "stats" ? "active" : ""}
+                onClick={() => setPanelView("stats")}
+              >
+                總覽
+              </button>
+              <button
+                className={panelView === "plan" ? "active" : ""}
+                onClick={() => setPanelView("plan")}
+              >
+                計畫
+              </button>
+              <button
+                className={panelView === "workout" ? "active" : ""}
+                onClick={() => setPanelView("workout")}
+                disabled={!currentPillarWorkout && !isGeneratingWorkout}
+              >
+                訓練
+              </button>
+            </div>
+            <div className="panel-content">{renderPanel()}</div>
+            <button className="btn-reset" onClick={onResetProfile}>
+              重新設定
+            </button>
+          </div>
         </div>
 
-        <div className="chat-input-main">
+        {/* Chat sheet — slides up when input is focused */}
+        <div className={`chat-sheet-overlay${isChatOpen ? " open" : ""}`}>
+          <div
+            className="chat-sheet-handle"
+            onClick={() => setIsChatOpen(false)}
+          />
+          {messages.length <= 1 && (
+            <div className="chat-quick-chips">
+              {QUICK_CHIPS.map((chip) => (
+                <button
+                  key={chip.label}
+                  className="chat-chip"
+                  onClick={() => handleQuickAction(chip.message)}
+                  disabled={isLoading}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div
+            className="chat-messages-wrap"
+            ref={sheetMessagesRef}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onWheel={handleMessagesWheel}
+          >
+            {messages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`chat-msg ${msg.role === "user" ? "user" : "assistant"}`}
+              >
+                {msg.role === "assistant" && <span className="msg-avatar">🏋️</span>}
+                <div className="msg-bubble">{msg.content}</div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="chat-msg assistant">
+                <span className="msg-avatar">🏋️</span>
+                <div className="msg-bubble typing">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* Always-visible input bar */}
+        <div className="chat-input-bar">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onFocus={() => setIsChatOpen(true)}
             placeholder="跟教練說點什麼..."
             rows={1}
             disabled={isLoading}
           />
           <button onClick={handleSend} disabled={!input.trim() || isLoading}>
-            發送
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
           </button>
         </div>
       </div>
-
-      {/* Mobile Navigation */}
-      {isMobile && (
-        <nav className="mobile-nav">
-          <button
-            className={mobileView === "panel" ? "active" : ""}
-            onClick={() => handleMobileNavClick("panel")}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <line x1="9" y1="3" x2="9" y2="21" />
-            </svg>
-            <span>面板</span>
-          </button>
-          <button
-            className={mobileView === "chat" ? "active" : ""}
-            onClick={() => handleMobileNavClick("chat")}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            <span>對話</span>
-          </button>
-        </nav>
-      )}
     </div>
   );
 }
@@ -668,8 +552,4 @@ function getIntensityLabel(intensity: string): string {
     high: "高強度",
   };
   return labels[intensity] || intensity;
-}
-
-function getDayClass(intensity: string): string {
-  return `intensity-${intensity}`;
 }

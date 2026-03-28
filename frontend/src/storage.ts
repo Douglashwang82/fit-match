@@ -1,8 +1,6 @@
 import type {
   UserProfile,
   WorkoutHistory,
-  TrainingPlan,
-  DailyWorkout,
   PillarBasedPlan,
   PillarWorkoutHistory,
   PillarProgress,
@@ -26,9 +24,6 @@ function getLocalDateString(date: Date = new Date()): string {
 const STORAGE_KEYS = {
   PROFILE: "syncmotion_profile",
   HISTORY: "syncmotion_history",
-  PLAN: "syncmotion_plan",
-  TODAY_WORKOUT: "syncmotion_today_workout",
-  COMPLETED_PLAN_DAYS: "syncmotion_completed_plan_days",
   // Pillar-based system
   PILLAR_PLAN: "syncmotion_pillar_plan",
   PILLAR_HISTORY: "syncmotion_pillar_history",
@@ -126,117 +121,10 @@ export function recordWorkoutCompletion(
   saveHistory(history);
 }
 
-// Plan
-export function savePlan(plan: TrainingPlan): void {
-  localStorage.setItem(STORAGE_KEYS.PLAN, JSON.stringify(plan));
-}
-
-export function getPlan(): TrainingPlan | null {
-  const data = localStorage.getItem(STORAGE_KEYS.PLAN);
-  if (!data) return null;
-  try {
-    return JSON.parse(data) as TrainingPlan;
-  } catch {
-    return null;
-  }
-}
-
-export function confirmPlan(): void {
-  const plan = getPlan();
-  if (plan) {
-    plan.confirmed = true;
-    savePlan(plan);
-  }
-}
-
-// Today's Workout
-export function saveTodayWorkout(workout: DailyWorkout): void {
-  localStorage.setItem(STORAGE_KEYS.TODAY_WORKOUT, JSON.stringify(workout));
-}
-
-export function getTodayWorkout(): DailyWorkout | null {
-  const data = localStorage.getItem(STORAGE_KEYS.TODAY_WORKOUT);
-  if (!data) return null;
-  try {
-    const workout = JSON.parse(data) as DailyWorkout;
-    // Check if the workout is from today (using local date)
-    const today = getLocalDateString();
-    if (workout.date === today) {
-      return workout;
-    }
-    // Workout is from a previous day, clear it
-    clearTodayWorkout();
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearTodayWorkout(): void {
-  localStorage.removeItem(STORAGE_KEYS.TODAY_WORKOUT);
-}
-
-// Completed Plan Days (for checklist feature)
-interface CompletedPlanDays {
-  weekStart: string; // ISO date of week start
-  completedDays: number[]; // Array of day numbers (1-7)
-}
-
-export function getCompletedPlanDays(): CompletedPlanDays {
-  const data = localStorage.getItem(STORAGE_KEYS.COMPLETED_PLAN_DAYS);
-  const weekStart = getWeekStartDate();
-
-  if (!data) {
-    return { weekStart, completedDays: [] };
-  }
-
-  try {
-    const stored = JSON.parse(data) as CompletedPlanDays;
-    // Reset if it's a new week
-    if (stored.weekStart !== weekStart) {
-      return { weekStart, completedDays: [] };
-    }
-    return stored;
-  } catch {
-    return { weekStart, completedDays: [] };
-  }
-}
-
-export function togglePlanDayCompletion(dayNumber: number): boolean {
-  const current = getCompletedPlanDays();
-  const isCompleted = current.completedDays.includes(dayNumber);
-
-  if (isCompleted) {
-    current.completedDays = current.completedDays.filter(d => d !== dayNumber);
-  } else {
-    current.completedDays.push(dayNumber);
-  }
-
-  localStorage.setItem(STORAGE_KEYS.COMPLETED_PLAN_DAYS, JSON.stringify(current));
-  return !isCompleted; // Return new state
-}
-
-export function isPlanDayCompleted(dayNumber: number): boolean {
-  const current = getCompletedPlanDays();
-  return current.completedDays.includes(dayNumber);
-}
-
-function getWeekStartDate(): string {
-  const today = new Date();
-  const dayOfWeek = today.getDay();
-  const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Monday is start of week
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - diff);
-  return getLocalDateString(monday);
-}
-
 // Clear all
 export function clearAll(): void {
   localStorage.removeItem(STORAGE_KEYS.PROFILE);
   localStorage.removeItem(STORAGE_KEYS.HISTORY);
-  localStorage.removeItem(STORAGE_KEYS.PLAN);
-  localStorage.removeItem(STORAGE_KEYS.TODAY_WORKOUT);
-  localStorage.removeItem(STORAGE_KEYS.COMPLETED_PLAN_DAYS);
   // Clear pillar data
   localStorage.removeItem(STORAGE_KEYS.PILLAR_PLAN);
   localStorage.removeItem(STORAGE_KEYS.PILLAR_HISTORY);
@@ -245,13 +133,8 @@ export function clearAll(): void {
 // Check if user has completed profile setup
 export function hasCompletedSetup(): boolean {
   const profile = getProfile();
-  const plan = getPlan();
   const pillarPlan = getPillarPlan();
-  // Support both legacy and pillar-based plans
-  return profile !== null && (
-    (plan !== null && plan.confirmed) ||
-    (pillarPlan !== null && pillarPlan.confirmed)
-  );
+  return profile !== null && pillarPlan !== null && pillarPlan.confirmed;
 }
 
 
@@ -441,25 +324,6 @@ export function calculatePillarProgress(
       };
     })
     .sort((a, b) => b.priorityScore - a.priorityScore);
-}
-
-// Migration helper for legacy plans
-export function migrateToV2Plan(): void {
-  const legacyHistory = getHistory();
-  const pillarHistory = getPillarHistory();
-
-  // If legacy history has data but pillar history is empty, migrate stats
-  if (
-    legacyHistory.totalWorkouts > 0 &&
-    pillarHistory.pillarRecords.length === 0
-  ) {
-    // Preserve streak and total workouts
-    pillarHistory.currentStreak = legacyHistory.currentStreak;
-    pillarHistory.totalWorkouts = legacyHistory.totalWorkouts;
-    pillarHistory.lastWorkoutDate = legacyHistory.lastWorkoutDate;
-    savePillarHistory(pillarHistory);
-    console.log("Migrated legacy workout stats to pillar system");
-  }
 }
 
 // Clear all pillar data

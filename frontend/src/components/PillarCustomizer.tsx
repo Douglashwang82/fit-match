@@ -30,7 +30,7 @@ export default function PillarCustomizer({ pillars, onSave, onCancel }: Props) {
 
   const handleRemovePillar = (index: number) => {
     if (editedPillars.length <= 1) {
-      alert("至少需要保留一個訓練支柱");
+      alert("至少需要保留一個訓練專項");
       return;
     }
     setEditedPillars(editedPillars.filter((_, i) => i !== index));
@@ -42,8 +42,8 @@ export default function PillarCustomizer({ pillars, onSave, onCancel }: Props) {
   const handleAddPillar = () => {
     const newPillar: TrainingPillar = {
       id: `custom-${Date.now()}`,
-      name: "新訓練支柱",
-      description: "自訂支柱描述",
+      name: "新訓練專項",
+      description: "自訂專項描述",
       targetFrequency: 1,
       exampleExercises: [],
       defaultDuration: 30,
@@ -60,9 +60,9 @@ export default function PillarCustomizer({ pillars, onSave, onCancel }: Props) {
 
   return (
     <div className="pillar-customizer">
-      <h3>自訂訓練支柱</h3>
+      <h3>自訂訓練專項</h3>
       <p className="customizer-hint">
-        調整支柱以符合你的需求 (每週總計: {totalFrequency} 次)
+        調整專項以符合你的需求 (每週總計: {totalFrequency} 次)
       </p>
 
       <div className="pillar-list">

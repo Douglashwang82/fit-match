@@ -7,22 +7,6 @@ export interface Exercise {
   notes?: string;
 }
 
-export interface WorkoutData {
-  day1_workout: Exercise[];
-  motivation_message: string;
-  workout_summary: string;
-}
-
-export type EnergyLevel = "energized" | "tired" | "exhausted";
-
-export interface UserInput {
-  goal: string;
-  daysPerWeek: number;
-  energyLevel: EnergyLevel;
-}
-
-export type AppStep = 1 | 2 | 3 | 4;
-
 // User Profile Types
 export type Gender = "male" | "female" | "other";
 export type FitnessLevel = "beginner" | "intermediate" | "advanced";
@@ -75,38 +59,11 @@ export interface WorkoutHistory {
 // Training Plan Types
 export type Intensity = "low" | "medium" | "high";
 
-export interface DayPlan {
-  day: number;
-  focus: string;
-  duration: number; // minutes
-  intensity: Intensity;
-}
-
-export interface TrainingPlan {
-  id: string;
-  createdAt: string;
-  weekOverview: DayPlan[];
-  confirmed: boolean;
-}
-
-// Daily Workout Types
-export interface DailyWorkout {
-  date: string;
-  dayNumber: number;
-  exercises: Exercise[];
-  warmup: string;
-  cooldown: string;
-  motivationMessage: string;
-  estimatedDuration: number;
-}
-
 // App Flow
 export type AppView =
   | "profile-setup"
   | "plan-review"
-  | "dashboard"
-  | "daily-checkin"
-  | "workout";
+  | "dashboard";
 
 
 // ─── Pillar-Based Training System Types ─────────────────────────────────────

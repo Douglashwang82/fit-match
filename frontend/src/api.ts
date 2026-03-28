@@ -1,10 +1,6 @@
 import type {
-  WorkoutData,
-  UserInput,
   UserProfile,
-  DayPlan,
   WorkoutHistory,
-  DailyWorkout,
   DailyEnergyLevel,
   TrainingPillar,
   PillarBasedPlan,
@@ -13,20 +9,6 @@ import type {
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-export async function generateWorkout(input: UserInput): Promise<WorkoutData> {
-  const response = await fetch(`${BASE_URL}/api/generate-workout`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user_goal: input.goal,
-      days_per_week: input.daysPerWeek,
-      energy_level: input.energyLevel,
-    }),
-  });
-  if (!response.ok) throw new Error("Failed to generate workout");
-  return response.json();
-}
 
 export async function joinWaitlist(
   email: string,
@@ -43,104 +25,6 @@ export async function getWaitlistCount(): Promise<number> {
   const response = await fetch(`${BASE_URL}/api/waitlist/count`);
   const data = await response.json();
   return data.count as number;
-}
-
-// Training Plan API
-interface TrainingPlanResponse {
-  week_overview: DayPlan[];
-  plan_summary: string;
-  weekly_goal: string;
-}
-
-export async function generateTrainingPlan(
-  profile: UserProfile
-): Promise<TrainingPlanResponse> {
-  const response = await fetch(`${BASE_URL}/api/training-plan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      profile: {
-        age: profile.age,
-        gender: profile.gender,
-        weight: profile.weight,
-        height: profile.height,
-        fitness_level: profile.fitnessLevel,
-        injuries: profile.injuries,
-        current_frequency: profile.currentFrequency,
-        preferred_exercises: profile.preferredExercises,
-        sleep_hours: profile.sleepHours,
-        work_schedule: profile.workSchedule,
-        diet_type: profile.dietType,
-        goal: profile.goal,
-        target_days_per_week: profile.targetDaysPerWeek,
-      },
-    }),
-  });
-  if (!response.ok) throw new Error("Failed to generate training plan");
-  return response.json();
-}
-
-// Daily Workout API
-export async function generateDailyWorkout(
-  profile: UserProfile,
-  plan: TrainingPlanResponse,
-  history: WorkoutHistory,
-  todayEnergy: DailyEnergyLevel,
-  dayNumber: number
-): Promise<DailyWorkout> {
-  const response = await fetch(`${BASE_URL}/api/daily-workout`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      profile: {
-        age: profile.age,
-        gender: profile.gender,
-        weight: profile.weight,
-        height: profile.height,
-        fitness_level: profile.fitnessLevel,
-        injuries: profile.injuries,
-        current_frequency: profile.currentFrequency,
-        preferred_exercises: profile.preferredExercises,
-        sleep_hours: profile.sleepHours,
-        work_schedule: profile.workSchedule,
-        diet_type: profile.dietType,
-        goal: profile.goal,
-        target_days_per_week: profile.targetDaysPerWeek,
-      },
-      plan: {
-        week_overview: plan.week_overview,
-        plan_summary: plan.plan_summary,
-        weekly_goal: plan.weekly_goal,
-      },
-      history: {
-        days_completed: history.daysCompleted,
-        current_streak: history.currentStreak,
-        total_workouts: history.totalWorkouts,
-        last_workout_date: history.lastWorkoutDate,
-        feedback: history.feedback.map((f) => ({
-          date: f.date,
-          energy_before: f.energyBefore,
-          completed: f.completed,
-          difficulty: f.difficulty,
-          notes: f.notes,
-        })),
-      },
-      today_energy: todayEnergy,
-      day_number: dayNumber,
-    }),
-  });
-  if (!response.ok) throw new Error("Failed to generate daily workout");
-
-  const data = await response.json();
-  return {
-    date: data.date,
-    dayNumber: data.day_number,
-    exercises: data.exercises,
-    warmup: data.warmup,
-    cooldown: data.cooldown,
-    motivationMessage: data.motivation_message,
-    estimatedDuration: data.estimated_duration,
-  };
 }
 
 // Chat API
@@ -307,40 +191,6 @@ export async function generatePillarPlan(
     rollingWindowDays: data.rolling_window_days,
     confirmed: false,
   };
-}
-
-// Pillar Priority from API
-export interface PillarPriorityApi {
-  pillar: TrainingPillar;
-  completions_in_window: number;
-  target_frequency: number;
-  completion_percentage: number;
-  last_trained_date: string | null;
-  days_since_last: number;
-  recommended_intensity: "low" | "medium" | "high";
-  priority_score: number;
-  recent_difficulty: string | null;
-}
-
-export async function getPillarPriorities(
-  pillars: TrainingPillar[],
-  pillarHistory: PillarWorkoutRecord[],
-  rollingWindowDays: number = 7
-): Promise<PillarPriorityApi[]> {
-  const response = await fetch(`${BASE_URL}/api/pillar-priorities`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      pillars: pillars.map(convertPillarToSnakeCase),
-      pillar_history: pillarHistory.map(convertRecordToSnakeCase),
-      rolling_window_days: rollingWindowDays,
-    }),
-  });
-
-  if (!response.ok) throw new Error("Failed to get pillar priorities");
-
-  const data = await response.json();
-  return data.priorities;
 }
 
 // Adaptive Daily Workout API

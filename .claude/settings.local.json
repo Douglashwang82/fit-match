@@ -10,7 +10,9 @@
       "Bash(npm install:*)",
       "Bash(npm run test:run:*)",
       "Bash(npm run build:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(npx tsc:*)",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }
