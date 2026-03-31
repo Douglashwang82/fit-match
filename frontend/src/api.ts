@@ -230,6 +230,137 @@ export async function generateAdaptiveWorkout(
   };
 }
 
+// ─── User Data Sync API ──────────────────────────────────────────────────────
+
+export async function ensureUser(userId: string): Promise<void> {
+  await fetch(`${BASE_URL}/api/users/${userId}/ensure`, { method: "POST" });
+}
+
+export async function saveProfileToBackend(
+  userId: string,
+  profile: UserProfile
+): Promise<void> {
+  await fetch(`${BASE_URL}/api/users/${userId}/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      profile: convertProfileToSnakeCase(profile),
+    }),
+  });
+}
+
+export async function loadProfileFromBackend(
+  userId: string
+): Promise<UserProfile | null> {
+  const res = await fetch(`${BASE_URL}/api/users/${userId}/profile`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to load profile");
+  const d = await res.json();
+  return {
+    age: d.age,
+    gender: d.gender,
+    weight: d.weight,
+    height: d.height,
+    fitnessLevel: d.fitness_level,
+    injuries: d.injuries ?? [],
+    currentFrequency: d.current_frequency,
+    preferredExercises: d.preferred_exercises ?? [],
+    sleepHours: d.sleep_hours,
+    workSchedule: d.work_schedule,
+    dietType: d.diet_type,
+    goal: d.goal,
+    targetDaysPerWeek: d.target_days_per_week,
+  } as UserProfile;
+}
+
+export async function savePillarPlanToBackend(
+  userId: string,
+  plan: PillarBasedPlan
+): Promise<void> {
+  await fetch(`${BASE_URL}/api/users/${userId}/pillar-plan`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan_id: plan.id,
+      plan_summary: plan.planSummary,
+      weekly_goal: plan.weeklyGoal,
+      rolling_window_days: plan.rollingWindowDays,
+      confirmed: plan.confirmed,
+      pillars: plan.pillars.map(convertPillarToSnakeCase),
+    }),
+  });
+}
+
+export async function confirmPillarPlanInBackend(userId: string): Promise<void> {
+  await fetch(`${BASE_URL}/api/users/${userId}/pillar-plan/confirm`, {
+    method: "PUT",
+  });
+}
+
+export async function loadPillarPlanFromBackend(
+  userId: string
+): Promise<PillarBasedPlan | null> {
+  const res = await fetch(`${BASE_URL}/api/users/${userId}/pillar-plan`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to load pillar plan");
+  const d = await res.json();
+  return {
+    id: d.id,
+    createdAt: d.created_at,
+    planSummary: d.plan_summary,
+    weeklyGoal: d.weekly_goal,
+    rollingWindowDays: d.rolling_window_days,
+    confirmed: d.confirmed,
+    pillars: (d.pillars ?? []).map((p: {
+      pillar_id: string; name: string; description: string;
+      target_frequency: number; example_exercises: string[];
+      default_duration: number; default_intensity: "low" | "medium" | "high";
+    }) => ({
+      id: p.pillar_id,
+      name: p.name,
+      description: p.description,
+      targetFrequency: p.target_frequency,
+      exampleExercises: p.example_exercises,
+      defaultDuration: p.default_duration,
+      defaultIntensity: p.default_intensity,
+    })),
+  } as PillarBasedPlan;
+}
+
+export async function saveWorkoutRecordToBackend(
+  userId: string,
+  record: PillarWorkoutRecord
+): Promise<void> {
+  await fetch(`${BASE_URL}/api/users/${userId}/workout-records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(convertRecordToSnakeCase(record)),
+  });
+}
+
+export async function loadWorkoutRecordsFromBackend(
+  userId: string,
+  days = 30
+): Promise<PillarWorkoutRecord[]> {
+  const res = await fetch(
+    `${BASE_URL}/api/users/${userId}/workout-records?days=${days}`
+  );
+  if (!res.ok) throw new Error("Failed to load workout records");
+  const d = await res.json();
+  return (d.records ?? []).map((r: {
+    date: string; pillar_id: string; duration: number;
+    difficulty: "too_easy" | "just_right" | "too_hard";
+    energy_before: "low" | "medium" | "high"; completed: boolean;
+  }) => ({
+    date: r.date,
+    pillarId: r.pillar_id,
+    duration: r.duration,
+    difficulty: r.difficulty,
+    energyBefore: r.energy_before,
+    completed: r.completed,
+  })) as PillarWorkoutRecord[];
+}
+
 // Update pillars (validation)
 export async function updatePillars(
   pillars: TrainingPillar[]

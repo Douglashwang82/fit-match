@@ -22,6 +22,10 @@ from models import (
     AdaptiveDailyWorkoutRequest,
     PillarDailyWorkoutResponse,
     UpdatePillarsRequest,
+    # User data sync models
+    SaveProfileRequest,
+    SavePillarPlanRequest,
+    SaveWorkoutRecordRequest,
 )
 from llm import (
     generate_workout,
@@ -33,7 +37,12 @@ from llm import (
     calculate_pillar_priorities,
     generate_adaptive_daily_workout,
 )
-from database import init_db, save_email, get_count
+from database import (
+    init_db, save_email, get_count,
+    ensure_user, save_profile, get_profile,
+    save_pillar_plan, confirm_pillar_plan, get_active_pillar_plan,
+    add_workout_record, get_workout_records,
+)
 init_db()
 
 app = FastAPI(title="SyncMotion API")
@@ -223,3 +232,103 @@ async def update_pillars(request: UpdatePillarsRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── User Data Sync Endpoints ────────────────────────────────────────────────
+
+@app.post("/api/users/{user_id}/ensure")
+async def ensure_user_exists(user_id: str):
+    """Create user record if it doesn't exist yet."""
+    try:
+        ensure_user(user_id)
+        return {"user_id": user_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/users/{user_id}/profile")
+async def upsert_profile(user_id: str, request: SaveProfileRequest):
+    """Save or update a user's profile."""
+    try:
+        ensure_user(user_id)
+        save_profile(user_id, request.profile.model_dump())
+        return {"success": True}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/{user_id}/profile")
+async def fetch_profile(user_id: str):
+    """Get a user's stored profile, or 404 if none."""
+    row = get_profile(user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    # Remove internal DB columns before returning
+    row.pop("id", None)
+    row.pop("user_id", None)
+    row.pop("updated_at", None)
+    return row
+
+
+@app.put("/api/users/{user_id}/pillar-plan")
+async def upsert_pillar_plan(user_id: str, request: SavePillarPlanRequest):
+    """Save or replace a user's active pillar plan."""
+    try:
+        ensure_user(user_id)
+        save_pillar_plan(
+            user_id=user_id,
+            plan_id=request.plan_id,
+            plan_data={
+                "plan_summary": request.plan_summary,
+                "weekly_goal": request.weekly_goal,
+                "rolling_window_days": request.rolling_window_days,
+                "confirmed": request.confirmed,
+            },
+            pillars=[p.model_dump() for p in request.pillars],
+        )
+        return {"success": True}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/users/{user_id}/pillar-plan/confirm")
+async def confirm_plan(user_id: str):
+    """Mark the user's active pillar plan as confirmed."""
+    try:
+        confirm_pillar_plan(user_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/{user_id}/pillar-plan")
+async def fetch_pillar_plan(user_id: str):
+    """Get the user's active pillar plan with its pillars."""
+    plan = get_active_pillar_plan(user_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="No active plan found")
+    return plan
+
+
+@app.post("/api/users/{user_id}/workout-records")
+async def save_workout_record(user_id: str, request: SaveWorkoutRecordRequest):
+    """Record a completed (or skipped) workout."""
+    try:
+        ensure_user(user_id)
+        add_workout_record(user_id, request.model_dump())
+        return {"success": True}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/{user_id}/workout-records")
+async def fetch_workout_records(user_id: str, days: int = 30):
+    """Get recent pillar workout records for a user."""
+    records = get_workout_records(user_id, days=days)
+    return {"records": records}

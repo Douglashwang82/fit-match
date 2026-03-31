@@ -8,7 +8,14 @@ import type {
   DailyEnergyLevel,
   WorkoutDifficulty,
   Intensity,
+  PillarWorkoutRecord,
 } from "./types";
+import {
+  saveProfileToBackend,
+  savePillarPlanToBackend,
+  confirmPillarPlanInBackend,
+  saveWorkoutRecordToBackend,
+} from "./api";
 
 /**
  * Get local date string in YYYY-MM-DD format (consistent with backend).
@@ -27,11 +34,26 @@ const STORAGE_KEYS = {
   // Pillar-based system
   PILLAR_PLAN: "syncmotion_pillar_plan",
   PILLAR_HISTORY: "syncmotion_pillar_history",
+  // Persistent anonymous user ID
+  USER_ID: "syncmotion_user_id",
 } as const;
+
+// ─── User Identity ────────────────────────────────────────────────────────────
+
+/** Returns a stable anonymous user UUID, creating one on first call. */
+export function getUserId(): string {
+  let id = localStorage.getItem(STORAGE_KEYS.USER_ID);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(STORAGE_KEYS.USER_ID, id);
+  }
+  return id;
+}
 
 // Profile
 export function saveProfile(profile: UserProfile): void {
   localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+  saveProfileToBackend(getUserId(), profile).catch(console.error);
 }
 
 export function getProfile(): UserProfile | null {
@@ -143,6 +165,7 @@ export function hasCompletedSetup(): boolean {
 // Pillar Plan Storage
 export function savePillarPlan(plan: PillarBasedPlan): void {
   localStorage.setItem(STORAGE_KEYS.PILLAR_PLAN, JSON.stringify(plan));
+  savePillarPlanToBackend(getUserId(), plan).catch(console.error);
 }
 
 export function getPillarPlan(): PillarBasedPlan | null {
@@ -160,6 +183,7 @@ export function confirmPillarPlan(): void {
   if (plan) {
     plan.confirmed = true;
     savePillarPlan(plan);
+    confirmPillarPlanInBackend(getUserId()).catch(console.error);
   }
 }
 
@@ -199,6 +223,17 @@ export function recordPillarWorkoutCompletion(
 ): void {
   const history = getPillarHistory();
   const today = getLocalDateString();
+
+  // Sync individual record to backend
+  const record: PillarWorkoutRecord = {
+    date: today,
+    pillarId,
+    duration,
+    difficulty,
+    energyBefore,
+    completed,
+  };
+  saveWorkoutRecordToBackend(getUserId(), record).catch(console.error);
 
   // Add pillar record
   history.pillarRecords.push({

@@ -310,3 +310,27 @@ class PillarDailyWorkoutResponse(BaseModel):
 class UpdatePillarsRequest(BaseModel):
     """Request to update/customize pillars."""
     pillars: list[TrainingPillar]
+
+
+# ─── User Data Sync Models ────────────────────────────────────────────────────
+
+class SaveProfileRequest(BaseModel):
+    profile: UserProfile
+
+
+class SavePillarPlanRequest(BaseModel):
+    plan_id: str
+    plan_summary: str
+    weekly_goal: str
+    rolling_window_days: int = 7
+    confirmed: bool = False
+    pillars: list[TrainingPillar]
+
+
+class SaveWorkoutRecordRequest(BaseModel):
+    date: str
+    pillar_id: str
+    duration: int
+    difficulty: Literal["too_easy", "just_right", "too_hard"]
+    energy_before: Literal["low", "medium", "high"]
+    completed: bool = True

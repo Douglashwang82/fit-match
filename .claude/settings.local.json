@@ -12,7 +12,11 @@
       "Bash(npm run build:*)",
       "Bash(python:*)",
       "Bash(npx tsc:*)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(railway:*)",
+      "Bash(RAILWAY_TOKEN=13d5f4a7-9a93-41ce-b691-6707c0f8a15d railway whoami 2>&1)",
+      "Bash(printf '\\\\n')",
+      "Bash(curl:*)"
     ]
   }
 }
